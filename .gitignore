@@ -1,5 +1,4 @@
 .vscode
-files/*
 .env
 Pip*
 *cpython*

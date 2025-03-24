@@ -44,7 +44,9 @@ async def main() -> None:
     """Start the bot and manage DB connections."""
     
     # Start your DB before entering the bot context
+    
     await start_db()
+    await bot_installer.set_defaults()
 
     # Create the application instance and set handlers
     application = botInstance.get(token, polling=True)

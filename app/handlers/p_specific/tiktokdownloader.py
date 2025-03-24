@@ -410,7 +410,9 @@ class TiktokDownloader():
                     rm = TikWMResponseModel(**data_from_api)
                     medias = [MediaItem(
                         type='video',
-                        url= str(rm.data.hdplay)
+                        url= str(rm.data.hdplay),
+                        length= rm.data.duration,
+                        cover= str(rm.data.cover)
                     )]
                     post_or_reel =  InstagramPost(
                         media= medias,

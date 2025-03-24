@@ -1,4 +1,9 @@
 import logging
+from mimetypes import guess_type
+import os
+import random
+import string
+from urllib.parse import urlparse
 
 from handlers.utils.downloader import download_video
 logger = logging.getLogger(__name__)
@@ -31,6 +36,12 @@ from handlers.utils.utils import querify, report_in_channel
 from db.models import InstagramAccount
 
 
+def random_string(length=12):
+    """Generate a random string of letters, digits, and special characters."""
+    characters = string.ascii_letters + string.digits
+    return ''.join(random.choices(characters, k=length))
+
+
 
 
 async def download_file(file_url, save_folder=Config.FILE_SAVE_FOLDER):
@@ -45,8 +56,9 @@ async def download_file(file_url, save_folder=Config.FILE_SAVE_FOLDER):
     # Extract filename from URL
     parsed_url = urlparse(file_url)
     filename = os.path.basename(parsed_url.path)  # Extracts original filename
+
     if not filename:  # Fallback if no filename is detected
-        filename = "instagram_video.mp4"
+        filename = random_string(16) + ".mp4"
 
     # # Ensure save directory exists
     # os.makedirs(save_folder, exist_ok=True)
@@ -78,7 +90,9 @@ async def download_file(file_url, save_folder=Config.FILE_SAVE_FOLDER):
 async def upload_media_to_telegram(
     context: ContextTypes.DEFAULT_TYPE,
     update:Update, 
-    media_path
+    media_path,
+    thumbnail,
+    duration
 ):
     """
     Sends any type of Instagram media (photo/video) to the Telegram user.
@@ -89,7 +103,7 @@ async def upload_media_to_telegram(
     """
 
     if not os.path.exists(media_path):  # Check if file exists before sending
-        print("❌ Error: Media file not found!")
+        await report_in_channel(context=context, text= "❌ Error: Media file not found!")
         return
 
     # Detect file type using mimetypes
@@ -102,7 +116,7 @@ async def upload_media_to_telegram(
                 msg = await context.bot.send_photo(
                     chat_id=update.effective_chat.id,
                     photo=media_file, 
-                    caption="🖼️ Here is your Instagram image!"
+                    # caption="🖼️ Here is your Instagram image!"
                     )
 
             elif media_type and media_type.startswith("video"):
@@ -110,20 +124,21 @@ async def upload_media_to_telegram(
                 msg = await context.bot.send_video(
                     chat_id=update.effective_chat.id,
                     video=media_file, 
-                    caption="🖼️ Here is your Instagram image!"
+                    thumbnail= thumbnail,
+                    duration= duration
                     )
             elif media_type and media_type.startswith("audio"):
                 media_type="audio"
                 msg = await context.bot.send_audio(
                     chat_id=update.effective_chat.id,
                     audio=media_file, 
-                    caption="🖼️ Here is your Instagram image!"
+                    # caption="🖼️ Here is your Instagram image!"
                     )
 
             else:
-                return print(f"⚠️ Unsupported media type: {media_type}")
+                return await report_in_channel(context=context, text=f"⚠️ Unsupported media type: {media_type}")
     except Exception as e:
-        return print(f"❌ Failed to send media: {e}")
+        return await report_in_channel(context=context, text=f"❌ Failed to send media: {e}")
 
     return msg
     # return media_type, file_id
@@ -134,8 +149,13 @@ async def upload_media_to_telegram(
 async def download_and_send_file_to_user(
     context: ContextTypes.DEFAULT_TYPE,
     update: Update,
-    link
+    media:InputMediaPhoto | InputMediaVideo
     ):
+
+    link = media.media
+    thumbnail = media.thumbnail
+    duration = media.duration
+
 
     file_path = await download_file(
         file_url= link,
@@ -143,20 +163,22 @@ async def download_and_send_file_to_user(
     )
 
     if not file_path:
-
-        return
+        return await report_in_channel(context=context, text=f"❌ file path is non-existent")
     
     try:
         sent_file = await upload_media_to_telegram(
             context=context,
             update=update,
-            media_path=file_path
+            media_path=file_path,
+            thumbnail = thumbnail,
+            duration = duration
             )
+        return sent_file
     
     finally:
         if os.path.exists(file_path):
             os.remove(file_path)
-            print("File deleted successfully.")
+            # print("File deleted successfully.")
         else:
             print("File does not exist.")
     
@@ -193,7 +215,7 @@ async def send_as_document_or_link(
 async def send_chunk(    
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    chunk:list,
+    chunk:list[InputMediaVideo | InputMediaPhoto],
     # media_list: List[MediaItem],
     # caption: str = Config.DEFAULT_CAPTION,
     caption_connected = True,
@@ -235,6 +257,7 @@ async def send_chunk(
                 return Config.ERRORS.SENDING_MESSAGE.PROBLEMATIC_LINK_OR_INABILITY_TO_CHECK_SIZE
             elif there_is_a_file_with_over_20mb_size(file_sizes):
 
+                print(file_sizes)
                 
                 # send_msgs = await context.bot.send_message(
                 #             chat_id=update.effective_chat.id, 
@@ -247,22 +270,24 @@ async def send_chunk(
                 #             parse_mode=ParseMode.HTML
                 #             )
 
-                send_msgs = await download_and_send_file_to_user(
-                    context=context,
-                    update= update,
-                    link= mediaitem.media
-                )
-                await context.bot.send_message(
+                for mediaitem in chunk:
+                    await download_and_send_file_to_user(
+                        context=context,
+                        update= update,
+                        media= mediaitem
+                    )
+                
+                send_msgs = await context.bot.send_message(
                         chat_id=update.effective_chat.id,
                         text= caption
                         )
                 
-                if file_sizes < 50:
-                    context.application.create_task(download_and_send_file_to_user(
-                        context=context,
-                        update=update,
-                        link=chunk[0].media
-                    ))
+                # if file_sizes < 50:
+                #     context.application.create_task(download_and_send_file_to_user(
+                #         context=context,
+                #         update=update,
+                #         link=chunk[0].media
+                #     ))
             else:
                 # print(file_sizes)
                 if caption_connected and caption_size_meets_telegram_standards(caption):
@@ -462,7 +487,11 @@ async def send_media(
                 media_group.append(InputMediaPhoto(url))
             elif media.type == "video":
                 url = media.url # + f"?filename=vid.mp4"
-                media_group.append(InputMediaVideo(url))
+                media_group.append(InputMediaVideo(
+                    url,
+                    thumbnail= media.cover,
+                    duration= media.length
+                    ))
             else:
                 context.application.create_task(
                     report_in_channel(context=context, text=f"Unknown media type '{media.type}' for URL: {media.url}")

@@ -16,6 +16,7 @@ class MediaItem(BaseModel):
     url: str
     original_url:Optional[str] = None
     cover: Optional[str] = None  # Some media might not have a cover [only used for some posts/reels]
+    length: Optional[int] = None
 
     @root_validator(pre=True)
     def unify_fields(cls, values):
